@@ -1,0 +1,568 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>implementations.controller_classes.allinclusive_classic_nonMPI &#8212; pySDC 2 documentation</title>
+    <link rel="stylesheet" href="../../../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">pySDC 2 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for implementations.controller_classes.allinclusive_classic_nonMPI</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">copy</span> <span class="k">as</span> <span class="nn">cp</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">dill</span>
+
+<span class="kn">from</span> <span class="nn">pySDC.core.Controller</span> <span class="k">import</span> <span class="n">controller</span>
+<span class="kn">from</span> <span class="nn">pySDC.core</span> <span class="k">import</span> <span class="n">Step</span> <span class="k">as</span> <span class="n">stepclass</span>
+<span class="kn">from</span> <span class="nn">pySDC.core.Errors</span> <span class="k">import</span> <span class="n">CommunicationError</span><span class="p">,</span> <span class="n">ControllerError</span>
+
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI">[docs]</a><span class="k">class</span> <span class="nc">allinclusive_classic_nonMPI</span><span class="p">(</span><span class="n">controller</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    PFASST controller, running serialized version of PFASST in classical style</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_procs</span><span class="p">,</span> <span class="n">controller_params</span><span class="p">,</span> <span class="n">description</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialization routine for PFASST controller</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            num_procs: number of parallel time steps (still serial, though), can be 1</span>
+<span class="sd">            controller_params: parameter set for the controller and the step class</span>
+<span class="sd">            description: all the parameters to set up the rest (levels, problems, transfer, ...)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># call parent&#39;s initialization routine</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">allinclusive_classic_nonMPI</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">controller_params</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;classic controller is about to become deprecated, use multigrid controller instead&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">MS</span> <span class="o">=</span> <span class="p">[</span><span class="n">stepclass</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">description</span><span class="p">)]</span>
+
+        <span class="c1"># try to initialize via dill.copy (much faster for many time-steps)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_procs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dill</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="c1"># if this fails (e.g. due to un-picklable data in the steps), initialize seperately</span>
+        <span class="k">except</span> <span class="n">dill</span><span class="o">.</span><span class="n">PicklingError</span> <span class="ow">and</span> <span class="ne">TypeError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;Need to initialize steps separately due to pickling error&#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_procs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stepclass</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">description</span><span class="p">))</span>
+
+        <span class="k">assert</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;ERROR: classic cannot do MSSDC&quot;</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">dump_setup</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">dump_setup</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">controller_params</span><span class="o">=</span><span class="n">controller_params</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="n">description</span><span class="p">)</span>
+
+        <span class="n">num_levels</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">num_procs</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">num_levels</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">S</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">L</span> <span class="ow">in</span> <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">L</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">coll</span><span class="o">.</span><span class="n">right_is_node</span> <span class="ow">or</span> <span class="n">L</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">do_coll_update</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">ControllerError</span><span class="p">(</span><span class="s2">&quot;For PFASST to work, we assume uend^k = u_M^k in this controller&quot;</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">nl</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">nl</span><span class="p">]</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">nsweeps</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">ControllerError</span><span class="p">(</span><span class="s1">&#39;classic controller cannot do multiple sweeps&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI.run"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">u0</span><span class="p">,</span> <span class="n">t0</span><span class="p">,</span> <span class="n">Tend</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Main driver for running the serial version of SDC, MSSDC, MLSDC and PFASST (virtual parallelism)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">           u0: initial values</span>
+<span class="sd">           t0: starting time</span>
+<span class="sd">           Tend: ending time</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            end values on the finest level</span>
+<span class="sd">            stats object containing statistics for each step, each level and each iteration</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># some initializations and reset of statistics</span>
+        <span class="n">uend</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">num_procs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">reset_stats</span><span class="p">()</span>
+
+        <span class="c1"># initial ordering of the steps: 0,1,...,Np-1</span>
+        <span class="n">slots</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_procs</span><span class="p">)]</span>
+
+        <span class="c1"># initialize time variables of each step</span>
+        <span class="n">time</span> <span class="o">=</span> <span class="p">[</span><span class="n">t0</span> <span class="o">+</span> <span class="nb">sum</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="o">.</span><span class="n">dt</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">p</span><span class="p">))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">slots</span><span class="p">]</span>
+
+        <span class="c1"># determine which steps are still active (time &lt; Tend)</span>
+        <span class="n">active</span> <span class="o">=</span> <span class="p">[</span><span class="n">time</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">Tend</span> <span class="o">-</span> <span class="mi">10</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">finfo</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">eps</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">slots</span><span class="p">]</span>
+
+        <span class="c1"># compress slots according to active steps, i.e. remove all steps which have times above Tend</span>
+        <span class="n">active_slots</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">itertools</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">slots</span><span class="p">,</span> <span class="n">active</span><span class="p">))</span>
+
+        <span class="c1"># initialize block of steps with u0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">restart_block</span><span class="p">(</span><span class="n">active_slots</span><span class="p">,</span> <span class="n">time</span><span class="p">,</span> <span class="n">u0</span><span class="p">)</span>
+
+        <span class="c1"># call pre-run hook</span>
+        <span class="k">for</span> <span class="n">S</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_run</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># main loop: as long as at least one step is still active (time &lt; Tend), do something</span>
+        <span class="k">while</span> <span class="nb">any</span><span class="p">(</span><span class="n">active</span><span class="p">):</span>
+
+            <span class="c1"># loop over all active steps (in the correct order)</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="nb">all</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">active_slots</span><span class="p">]):</span>
+
+                <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">active_slots</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pfasst</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">active_slots</span><span class="p">))</span>
+
+            <span class="c1"># uend is uend of the last active step in the list</span>
+            <span class="n">uend</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">active_slots</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">uend</span>
+
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">active_slots</span><span class="p">:</span>
+                <span class="n">time</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="o">+=</span> <span class="n">num_procs</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">dt</span>
+
+            <span class="c1"># determine new set of active steps and compress slots accordingly</span>
+            <span class="n">active</span> <span class="o">=</span> <span class="p">[</span><span class="n">time</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">Tend</span> <span class="o">-</span> <span class="mi">10</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">finfo</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">eps</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">slots</span><span class="p">]</span>
+            <span class="n">active_slots</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">itertools</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">slots</span><span class="p">,</span> <span class="n">active</span><span class="p">))</span>
+
+            <span class="c1"># restart active steps (reset all values and pass uend to u0)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">restart_block</span><span class="p">(</span><span class="n">active_slots</span><span class="p">,</span> <span class="n">time</span><span class="p">,</span> <span class="n">uend</span><span class="p">)</span>
+
+        <span class="c1"># call post-run hook</span>
+        <span class="k">for</span> <span class="n">S</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_run</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">uend</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">return_stats</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI.restart_block"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI.restart_block">[docs]</a>    <span class="k">def</span> <span class="nf">restart_block</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">active_slots</span><span class="p">,</span> <span class="n">time</span><span class="p">,</span> <span class="n">u0</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Helper routine to reset/restart block of (active) steps</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            active_slots: list of active steps</span>
+<span class="sd">            time: new times for the steps</span>
+<span class="sd">            u0: initial value to distribute across the steps</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># loop over active slots (not directly, since we need the previous entry as well)</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">active_slots</span><span class="p">)):</span>
+
+            <span class="c1"># get slot number</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">active_slots</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+
+            <span class="c1"># store current slot number for diagnostics</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span> <span class="o">=</span> <span class="n">p</span>
+
+            <span class="c1"># resets step</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">reset_step</span><span class="p">()</span>
+            <span class="c1"># determine whether I am the first and/or last in line</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span> <span class="o">=</span> <span class="n">active_slots</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span><span class="p">:</span>
+                <span class="c1"># store link to previous step</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">prev</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">active_slots</span><span class="p">[</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span> <span class="o">=</span> <span class="n">active_slots</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">active_slots</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span><span class="p">:</span>
+                <span class="c1"># store link to next step</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">next</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">active_slots</span><span class="p">[</span><span class="n">j</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span>
+            <span class="c1"># intialize step with u0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">init_step</span><span class="p">(</span><span class="n">u0</span><span class="p">)</span>
+            <span class="c1"># reset some values</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pred_cnt</span> <span class="o">=</span> <span class="n">active_slots</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">iter</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;SPREAD&#39;</span>
+            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">:</span>
+                <span class="n">l</span><span class="o">.</span><span class="n">tag</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="n">l</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">sweep</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">active_slots</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">lvl</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">MS</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">levels</span><span class="p">:</span>
+                <span class="n">lvl</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">time</span> <span class="o">=</span> <span class="n">time</span><span class="p">[</span><span class="n">p</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI.recv"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI.recv">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">recv</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Receive function</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            target: level which will receive the values</span>
+<span class="sd">            source: level which initiated the send</span>
+<span class="sd">            tag: identifier to check if this message is really for me</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="n">tag</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">source</span><span class="o">.</span><span class="n">tag</span> <span class="o">!=</span> <span class="n">tag</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">CommunicationError</span><span class="p">(</span><span class="s1">&#39;source and target tag are not the same, got </span><span class="si">%s</span><span class="s1"> and </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">tag</span><span class="p">,</span> <span class="n">tag</span><span class="p">))</span>
+        <span class="c1"># uend becomes the new u0 at the target</span>
+        <span class="n">target</span><span class="o">.</span><span class="n">u</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">prob</span><span class="o">.</span><span class="n">dtype_u</span><span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">uend</span><span class="p">)</span>
+        <span class="c1"># re-evaluate f on left interval boundary</span>
+        <span class="n">target</span><span class="o">.</span><span class="n">f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">prob</span><span class="o">.</span><span class="n">eval_f</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="n">u</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">target</span><span class="o">.</span><span class="n">time</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI.send"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI.send">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">send</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">tag</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Send function</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            source: level which has the new values</span>
+<span class="sd">            tag: identifier for this message</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># sending here means computing uend (&quot;one-sided communication&quot;)</span>
+        <span class="n">source</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_end_point</span><span class="p">()</span>
+        <span class="n">source</span><span class="o">.</span><span class="n">tag</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="allinclusive_classic_nonMPI.pfasst"><a class="viewcode-back" href="../../../pySDC/implementations.controller_classes.html#implementations.controller_classes.allinclusive_classic_nonMPI.allinclusive_classic_nonMPI.pfasst">[docs]</a>    <span class="k">def</span> <span class="nf">pfasst</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">S</span><span class="p">,</span> <span class="n">num_procs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Main function including the stages of SDC, MLSDC and PFASST (the &quot;controller&quot;)</span>
+
+<span class="sd">        For the workflow of this controller, check out one of our PFASST talks</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            S: currently active step</span>
+<span class="sd">            num_procs: number of active processors</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            updated step</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># if S is done, stop right here</span>
+        <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="n">stage</span> <span class="o">=</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Process </span><span class="si">%2i</span><span class="s2"> at stage </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">stage</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;SPREAD&#39;</span><span class="p">:</span>
+            <span class="c1"># first stage: spread values</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_step</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="c1"># call predictor from sweeper</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">predict</span><span class="p">()</span>
+
+            <span class="c1"># update stage</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">predict</span><span class="p">:</span>  <span class="c1"># MLSDC or PFASST with predict</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_RESTRICT&#39;</span>
+            <span class="k">else</span><span class="p">:</span>  <span class="c1"># SDC</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_CHECK&#39;</span>
+
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;PREDICT_RESTRICT&#39;</span><span class="p">:</span>
+            <span class="c1"># call predictor (serial)</span>
+
+            <span class="c1"># go to coarsest level via transfer</span>
+
+            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)):</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="n">target</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">])</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_SWEEP&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;PREDICT_SWEEP&#39;</span><span class="p">:</span>
+
+            <span class="c1"># do a (serial) sweep on coarsest level</span>
+
+            <span class="c1"># receive new values from previous step (if not first step)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> receives from </span><span class="si">%2i</span><span class="s1"> on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1"> -- PREDICT&#39;</span> <span class="o">%</span>
+                                      <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="c1"># reset tag to signal successful receive</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="o">=</span> <span class="kc">False</span>
+
+            <span class="c1"># do the sweep with (possibly) new values</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">update_nodes</span><span class="p">()</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_SEND&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;PREDICT_SEND&#39;</span><span class="p">:</span>
+            <span class="c1"># send updated values on coarsest level</span>
+
+            <span class="c1"># send new values forward, if previous send was successful (otherwise: try again)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> provides data on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1"> -- PREDICT&#39;</span>
+                                      <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">tag</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_SEND&#39;</span>
+                    <span class="k">return</span> <span class="n">S</span>
+
+            <span class="c1"># decrement counter to determine how many coarse sweeps are necessary</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pred_cnt</span> <span class="o">-=</span> <span class="mi">1</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">pred_cnt</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_INTERP&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;PREDICT_SWEEP&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;PREDICT_INTERP&#39;</span><span class="p">:</span>
+            <span class="c1"># prolong back to finest level</span>
+
+            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">target</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_CHECK&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_CHECK&#39;</span><span class="p">:</span>
+
+            <span class="c1"># check whether to stop iterating</span>
+
+            <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_residual</span><span class="p">()</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_convergence</span><span class="p">(</span><span class="n">S</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">iter</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_iteration</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="c1"># if the previous step is still iterating but I am done, un-do me to still forward values</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span> <span class="ow">and</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="ow">and</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">):</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
+
+            <span class="c1"># if I am done, signal accordingly, otherwise proceed</span>
+            <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_end_point</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_step</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;DONE&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># increment iteration count here (and only here)</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">iter</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_iteration</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_UP&#39;</span>
+                <span class="k">else</span><span class="p">:</span>  <span class="c1"># SDC</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_FINE_SWEEP&#39;</span>
+            <span class="c1"># return</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_FINE_SWEEP&#39;</span><span class="p">:</span>
+            <span class="c1"># do sweep on finest level</span>
+
+            <span class="c1"># standard sweep workflow: update nodes, compute residual, log progress</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">nsweeps</span><span class="p">):</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">update_nodes</span><span class="p">()</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_residual</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_FINE_SEND&#39;</span>
+
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_FINE_SEND&#39;</span><span class="p">:</span>
+            <span class="c1"># send forward values on finest level</span>
+
+            <span class="c1"># if last send succeeded on this level or if last rank, send new values (otherwise: try again)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">next</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">fine_comm</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> provides data on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1">&#39;</span>
+                                      <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">tag</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_CHECK&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_FINE_SEND&#39;</span>
+            <span class="c1"># return</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_UP&#39;</span><span class="p">:</span>
+            <span class="c1"># go up the hierarchy from finest to coarsest level</span>
+
+            <span class="n">S</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">target</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+            <span class="c1"># sweep and send on middle levels (not on finest, not on coarsest, though)</span>
+            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="n">l</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">]</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">nsweeps</span><span class="p">):</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">update_nodes</span><span class="p">()</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_residual</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="n">l</span><span class="p">)</span>
+
+                <span class="c1"># send if last send succeeded on this level (otherwise: abort with error)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">next</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">fine_comm</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> provides data on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1">&#39;</span>
+                                          <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">l</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">tag</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">CommunicationError</span><span class="p">(</span><span class="s1">&#39;Sending failed on process </span><span class="si">%2i</span><span class="s1">, level </span><span class="si">%2i</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">l</span><span class="p">))</span>
+
+                <span class="c1"># transfer further up the hierarchy</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">target</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_RECV&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_COARSE_RECV&#39;</span><span class="p">:</span>
+
+            <span class="c1"># receive on coarsest level</span>
+
+            <span class="c1"># rather complex logic here...</span>
+            <span class="c1"># if I am not the first in line and if the first is not done yet, try to receive</span>
+            <span class="c1"># otherwise: proceed, no receiving possible/necessary</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                <span class="c1"># try to receive and the progress (otherwise: try again)</span>
+                <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> receives from </span><span class="si">%2i</span><span class="s1"> on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                                      <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">num_procs</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_SWEEP&#39;</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">ControllerError</span><span class="p">(</span><span class="s1">&#39;Stage unclear after coarse send&#39;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_RECV&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">num_procs</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_SWEEP&#39;</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">ControllerError</span><span class="p">(</span><span class="s1">&#39;Stage unclear after coarse send&#39;</span><span class="p">)</span>
+            <span class="c1"># return</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_COARSE_SWEEP&#39;</span><span class="p">:</span>
+            <span class="c1"># coarsest sweep</span>
+
+            <span class="c1"># standard sweep workflow: update nodes, compute residual, log progress</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">nsweeps</span><span class="p">):</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">update_nodes</span><span class="p">()</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_residual</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_SEND&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_COARSE_SEND&#39;</span><span class="p">:</span>
+            <span class="c1"># send forward coarsest values</span>
+
+            <span class="c1"># try to send new values (if old ones have not been picked up yet, retry)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">last</span> <span class="ow">or</span> <span class="n">S</span><span class="o">.</span><span class="n">next</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> provides data on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1">&#39;</span>
+                                  <span class="o">%</span> <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">tag</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="c1"># update stage</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_DOWN&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_COARSE_SEND&#39;</span>
+            <span class="c1"># return</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s1">&#39;IT_DOWN&#39;</span><span class="p">:</span>
+            <span class="c1"># prolong corrections own to finest level</span>
+
+            <span class="c1"># receive and sweep on middle levels (except for coarsest level)</span>
+            <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+
+                <span class="c1"># if applicable, try to receive values from IT_UP, otherwise abort</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">fine_comm</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">first</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;Process </span><span class="si">%2i</span><span class="s1"> receives from </span><span class="si">%2i</span><span class="s1"> on level </span><span class="si">%2i</span><span class="s1"> with tag </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span>
+                                          <span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">slot</span><span class="p">,</span> <span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+                        <span class="n">S</span><span class="o">.</span><span class="n">prev</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">tag</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">CommunicationError</span><span class="p">(</span><span class="s1">&#39;Sending failed during IT_DOWN&#39;</span><span class="p">)</span>
+
+                <span class="c1"># prolong values</span>
+                <span class="n">S</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">target</span><span class="o">=</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+
+                <span class="c1"># on middle levels: do sweep as usual</span>
+                <span class="k">if</span> <span class="n">l</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">pre_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">nsweeps</span><span class="p">):</span>
+                        <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">update_nodes</span><span class="p">()</span>
+                    <span class="n">S</span><span class="o">.</span><span class="n">levels</span><span class="p">[</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">sweep</span><span class="o">.</span><span class="n">compute_residual</span><span class="p">()</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">post_sweep</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">S</span><span class="p">,</span> <span class="n">level_number</span><span class="o">=</span><span class="n">l</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># update stage and return</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span> <span class="o">=</span> <span class="s1">&#39;IT_FINE_SWEEP&#39;</span>
+            <span class="k">return</span> <span class="n">S</span>
+
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="k">raise</span> <span class="n">ControllerError</span><span class="p">(</span><span class="s1">&#39;Unknown stage, got </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">S</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">stage</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../../index.html">pySDC 2 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Robert Speck.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.8.2.
+    </div>
+  </body>
+</html>
